@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+
+        .axis text {
+          font: 11px sans-serif;
+        }
+
+        .axis path {
+          display: none;
+        }
+
+        .axis line {
+          fill: none;
+          stroke: #000;
+          shape-rendering: crispEdges;
+        }
+
+        .grid-background {
+          fill: #ddd;
+          stroke-width:2;
+          stroke:rgb(0,0,0);
+        }
+
+        .grid line,
+        .grid path {
+          fill: none;
+          stroke: #fff;
+          shape-rendering: crispEdges;
+        }
+
+        .grid .minor.tick line {
+          stroke-opacity: .5;
+        }
+
+        .brush .extent {
+          stroke: #000;
+          fill-opacity: .125;
+          shape-rendering: crispEdges;
+        }
+
+        </style>
+    </head>
+    
+    <body>
+    
+        <svg width="600" height="200" viewBox="0 0 50 20" >
+            <rect x="20" y="10" width="10" height="5" style="stroke: #000000; fill:none;" />
+            <foreignObject width="100%" height="100%">
+              <div xmlns="http://www.w3.org/1999/xhtml" style="font-size:15px; display:inline;">
+                <em>I</em> like
+                <span style="color:white; text-shadow:0 0 2px blue;">cheese</span>
+              </div>
+            </foreignObject>
+        </svg>
+
+        <script type="text/javascript" src="d3.v3.5.5.js"></script>
+        <script type="text/javascript" src="http://localhost/wavesjs-ui-basic/EventEmitter.js"></script>
+        <script type="text/javascript" src="http://localhost/wavesjs-ui-basic/interactions/EventSource.js"></script>
+        <script type="text/javascript" src="http://localhost/wavesjs-ui-basic/interactions/Surface.js"></script>
+        
+        <script>
+
+        var margin = {
+          top: 200, 
+          right: 40, 
+          bottom: 200, 
+          left: 40
+        };
+        var trackHeight = 50;
+        var width = 960;
+        var height = trackHeight * 2;
+        var defaultDomainX = [0, 100];
+        var defaultDomainY = [0, 1];
+        // var defaultBrushDomain = [10, 30];
+        var defaultBrushDomain = [[10, 0], [30, 1]];
+        var defaultScaleX = d3.scale.linear()
+                              .domain(defaultDomainX)
+                              .range([0, width]);
+        var defaultScaleY = d3.scale.linear()
+                              .domain(defaultDomainY)
+                              .range([0, height]);
+
+        var backgroundGrid, gridAxis, gridAxisDOM;
+
+        
+
+        create_timeline_board({width: width, height: height, left: margin.left, top: margin.top});
+
+        create_track({startTime: 0, endTime: 100, width: width, height: trackHeight});
+
+
+
+
+
+
+        function create_timeline_board(params) {
+          /*
+           *  Contentor SVG para a área de trabalho.
+           */
+          var svg = d3.select("body")
+                      .append("svg")
+                      // .classed("timeline-board", true)
+                      .attr("width", params.width)
+                      .attr("height", params.height)
+                      .append("g")
+                      // .attr("transform", "translate(" + params.left + "," + params.top + ")");
+
+          return { domEl: svg };
+        }
+
+        // params: {scaleX: d3.scale, scaleY: d3.scale, el: SVGElement}
+        function create_brush(params) {
+          var scaleX = params.scaleX;
+          var scaleY = params.scaleY;
+          var brushD3Obj, brushDOMEl;
+
+          /*
+           *  Objecto, em Javascript, com a lógica para controlar o 
+           * estado do element brush na DOM.
+           */
+          brushD3Obj = d3.svg.brush()
+                            .x(scaleX)
+                            .y(scaleY)
+                            // .extent(defaultBrushDomain)
+                            .on("brushstart", handleBrushStart)
+                            .on("brush", handleBrush)
+                            .on("brushend", handleBrushEnd);
+
+
+          /*
+           *  Grupo SVG com o elemento DOM para o objecto brush.
+           */
+          brushDOMEl = svg.append("g")
+                          .attr("class", "brush")
+                          .call(brushD3Obj);
+          brushDOMEl.selectAll("rect")
+                .attr("height", height);
+
+          return { d3Obj: brushD3Obj, domEl: brushDOMEl };
+        }
+
+        // params: {scale: d3.scale, height: Number, parentContainer: d3.selection}
+        function create_time_ruler(params) {
+          var scale = params.scale;
+          var height = params.height;
+          var svg = params.parentContainer;
+
+          /*
+           *  Marcações do eixo temporal.
+           */
+          var xRuler = d3.svg.axis()
+                            .scale(scale)
+                            .orient("bottom")
+                            .ticks(12)
+                            .tickPadding(0);
+
+          var xRulerDOM = svg.append("g")
+                            .attr("class", "x axis")
+                            .attr("transform", "translate(0," + height + ")") // translação da régua em relação ao contentor do grupo.
+
+          xRulerDOM.call(xRuler)
+                  .selectAll("text")
+                  .attr("x", 0) // Distância (horizontal) do texto da legenda para a régua.
+                  .attr("y", 10) // Distância (vertical) do texto da legenda para a régua.
+                  .style("text-anchor", null);
+
+          return { d3Obj: xRuler, domEl: xRulerDOM };
+
+        }
+
+
+        // params: {height: Number, width: Number, startTime: Number, endTime: Number, parentContainer: d3.selection}
+        function create_track(params) {
+
+          var trackHeight = params.height;
+          var width       = params.width;
+          var startTime   = params.startTime;
+          var endTime     = params.endTime;
+          var svg         = params.parentContainer;
+
+
+          /*
+           *  Rectângulo que "contém" a área de desenho.
+           */
+          var backgroundGrid = svg.append("rect")
+                                  .attr("class", "grid-background")
+                                  .attr("width", width)
+                                  .attr("height", trackHeight);
+
+          /*
+           *  Grelha branca do fundo.
+           */
+          var gridAxis = d3.svg.axis()
+                              .scale(defaultScaleX)
+                              .orient("bottom")
+                              .ticks(12)
+                              .tickSize(-trackHeight) // Como é uma marcação horizontal, especifica a altura, be baixo para cima, da risca para cada tick. 
+                              .tickFormat("");
+
+          var gridAxisDOM = svg.append("g")
+                                .attr("class", "x grid")
+                                .attr("transform", "translate(0," + trackHeight + ")")
+                                .call(gridAxis);
+
+        }
+
+        function create_track_layer() {
+          // TODO
+        }
+
+
+            
+
+
+        function changeTimeDomain(start, end) {
+
+          var newScale = d3.time.scale()
+                         .domain([start, end])
+                         .range([0, width]);
+          
+          gridAxis.scale(newScale);
+
+          gridAxisDOM.call(gridAxis);
+
+          xRuler.scale(newScale);
+
+          xRulerDOM.call(xRuler);
+
+          brush.x(newScale);
+
+          var oldExtent = 
+
+          brushDOM.call(brush);
+
+
+
+        }
+
+
+
+
+
+        function handleBrushStart() {
+          // TODO
+        }
+
+        function handleBrushEnd() {
+          // TODO
+        }
+
+        function handleBrush() {
+          console.log(brush.extent());
+          console.log(d3.event)
+          // console.log(d3.event);
+          // console.log(brush.extent());
+          
+          // var extent0 = brush.extent();
+          // var extent1;
+
+          // // if dragging, preserve the width of the extent
+          // if (d3.event.mode === "move") {
+          //     // var d0 = d3.time.day.round(extent0[0]);
+          //     // var d1 = d3.time.day.offset(d0, Math.round((extent0[1] - extent0[0]) / 864e5));
+          //     // extent1 = [d0, d1];
+          //     var delta = extent0[1] - extent0[0];
+          //     var d0 = Math.floor(extent0[0]);
+          //     var d1 = d0 + delta;
+          //     extent1 = [d0, d1];
+          // }
+          // // otherwise, if resizing, round both dates
+          // else {
+          //     // extent1 = extent0.map(d3.time.day.round);
+
+          //     // // if empty when rounded, use floor & ceil instead
+          //     // if (extent1[0] >= extent1[1]) {
+          //     //     extent1[0] = d3.time.day.floor(extent0[0]);
+          //     //     extent1[1] = d3.time.day.ceil(extent0[1]);
+          //     // }
+
+          //     extent1 = extent0;
+          // }
+
+          // d3.select(this).call(brush.extent(extent1));
+        }
+
+
+        </script>
+        
+    </body>
+    
+</html>
